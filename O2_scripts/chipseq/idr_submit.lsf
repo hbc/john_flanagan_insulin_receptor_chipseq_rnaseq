@@ -1,0 +1,13 @@
+#!/bin/sh
+
+#BSUB -q priority
+#BSUB -J flanagan-hepG2-idr
+#BSUB -W 20:00
+#BSUB -n 1
+#BSUB -R "rusage[mem=40000]"
+#BSUB -e flanagan-hepG2-idr.err
+#BSUB -o HepG2Pol2_ins.out
+
+
+sh idr_HepG2.sh 20150624-12-HepG2-ins-2-input-MH2026-1_S12_R1.fastq_bowtie_sorted.bam 20150624-8-HepG2-ins-2-Pol2-MH2026-1_S8_R1.fastq_bowtie_sorted.bam 20150319-1-HepG2input-MH1746_S1_R1.fastq.gz_bowtie_sorted.bam 20150319-5-HepG2Pol2-IP-ins-MH1746_S5_R1.fastq.gz_bowtie_sorted.bam HepG2Pol2-ins
+

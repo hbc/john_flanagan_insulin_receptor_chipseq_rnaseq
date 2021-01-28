@@ -1,0 +1,10 @@
+#!/bin/sh
+#BSUB -q priority
+#BSUB -J flanagan-macs-retest
+#BSUB -n 8
+#BSUB -W 6:00
+
+
+module load seq/macs/2.1.0
+
+macs2 callpeak -t bowtie1/20150625-15-SH-con-1-IR-MH2026-2_S3_R1.fastq.gz_bowtie_sorted.bam -c bowtie1/20150625-17-SH-con-1-input-MH2026-2_S5_R1.fastq.gz_bowtie_sorted.bam -f BAM -g hs -n SHSY5YIR-con1-trial2 -B -q 0.01
