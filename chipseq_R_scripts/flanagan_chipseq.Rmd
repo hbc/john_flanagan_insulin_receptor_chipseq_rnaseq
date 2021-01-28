@@ -1,0 +1,298 @@
+---
+  html_document:
+    toc: true
+    highlight: zenburn
+    theme: united
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(tidy=TRUE, highlight=TRUE, dev="png",
+               cache=FALSE, highlight=TRUE, autodep=TRUE, warning=FALSE, error=FALSE,
+               message=FALSE, prompt=TRUE, comment='', fig.cap='')
+```
+
+
+# Flanagan ChIP-Seq Analysis
+```{r setup-var, echo=FALSE}
+ 
+# Setup report details
+clientname="Melissa Hancock"
+clientemail="melissa_hancock@hms.harvard.edu  "
+lablocation="Flanagan lab" 
+analystname="Meeta Mistry"
+analystemail="mmistry@hsph.harvard.edu"
+```
+
+ChIP-Seq analysis for `r clientname` (`r clientemail`) from the `r lablocation`. Contact `r analystname` (`r analystemail`) for additional details. Request from client was:     
+
+> We find that the insulin receptor (IR) binds directly to chromatin and to Pol2. The ChIP experiments are designed to investigate the specific target genes in both hepatic (HepG2) and neuroblastoma (SH-SY5Y) human cell lines
+
+Experimental design:
+
+* HepG2 (hepatic) and SH-SY5Y (neuroblastoma) human cells were serum starved overnight, and treated with control (vehicle) or insulin (100 nM) for 10 min.  
+* Cells were processed for ChIP, and antibodies against either IR (sc-711) or Pol2a (CST 2629), for both phosphorylated and unphosphorylated Pol2a) were used for IP.
+* There are a total of 24 samples. For each cell line-IP combination (HepG2Pol2, HepG2IR, SHSPol2, SHSIR) we have two replicates for each treatment condition (insulin and control). Input replicates were also prepared for each treatment replicate.
+* Libraries were constructed using Rubicon ChIPseq library prep kit, and sequencing was performed using Illumina NS500 Single-End 75bp (SE75), both at DFCI
+
+
+## Setup
+
+```{r qc-setup}
+library(ggplot2)
+library(reshape)
+library(gplots)
+library(png)
+library(CHBUtils)
+library(pheatmap)
+
+baseDir = "/home/mistrm82/R/flanagan_chipseq2rnaseq/"
+summary_stats = file.path(baseDir, "sample_stats.txt")
+summarydata = data.frame(read.table(summary_stats, header=TRUE, sep="\t"), row.names=1)
+
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+"#0072B2", "#D55E00", "#CC79A7")
+
+# Apply shortnames for consistency
+shortname = sapply(row.names(summarydata), function(x){
+                  s <- unlist(strsplit(x, "-"))
+                  newname <- paste(s[3:6], collapse="-")}, USE.NAMES=F)
+summarydata$shortname <- factor(shortname)
+```
+
+
+
+## Alignment and Trimming
+The raw reads for each sample were trimmed using cutadapt and then aligned to the reference genome (hg19) using Bowtie1 (version 1.1.1). We included a parameter (-m) such that only uniquely mapping reads were retained for each sample. Below we have plotted an overview of summary statistics at each stage. 
+
+The total number of reads vary across samples but in general the number is quite high (> 10 million). The mapping rate is very good at ~80% for all samples. The percent of reads that are trimmed in each sample is roughly the same across all samples. Based on trimming and alignment stages nothing is particularly unusual.
+
+### Trimmed reads
+
+```{r trim-plot}
+ggplot(summarydata, aes(x=shortname, y=trimmed_reads/total_reads)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(stat="identity") +
+    ylab("trimmed reads (percent of total)") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) 
+```
+
+### Mapped reads
+
+```{r mapped-plot}
+ggplot(summarydata, aes(x=shortname, y=mapped_reads)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(stat="identity") +
+    ylab("mapped reads") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) 
+```
+
+
+### Mapping rate
+
+```{r maprate-plot}
+ggplot(summarydata, aes(x=shortname, y=(mapped_reads/total_reads))) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(stat="identity") +
+    ylab("mapping rate") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) 
+```
+
+
+
+## Quality Measures
+
+We used the [phantompeakqualtools package](https://code.google.com/p/phantompeakqualtools/) to compute informative enrichment and quality measures for ChIP-seq  data. This tool computes the predominant insert-size (fragment length) based on strand cross-correlation peak, and computes data quality measures based on relative phantom peak. Some of these measures are displayed and described below, but the full table of results can be downloaded from the links provided.
+
+* Full QC measures [HepG2](./QC/HepG2_QC)
+* Full QC measures [SHSY5Y](./QC/SHSY5Y_QC)
+
+**NSC (normalized strand cross-correlation coefficient)** values range from a minimum of 1 to larger positive numbers. 1.1 is the critical threshold. Datasets with NSC values much less than 1.1 (< 1.05) tend to have low signal to noise or few peaks (this could be biological eg.a factor that truly binds only a few sites in a particular tissue type OR it could be due to poor quality).										
+										
+**RSC (relative strand cross-correlation coefficient)** values range from 0 to larger positive values. 1 is the critical threshold. Quality value is based on thresholded RSC (codes: -2:veryLow,-1:Low,0:Medium,1:High,2:veryHigh)		
+
+All samples are below the critical thresholds for NSC and RSC values, with the SHSY5Y samples showing generally smaller numbers that the HepG2 samples
+
+
+### HepG2 samples
+
+```{r qc-measures-hepg2}
+hepg2 <- read.delim("QC//HepG2_QC", header=T, sep="\t", row.names=1)
+out <- hepg2[,c("estFraglen", "NSC","RSC","quality")]
+rows <- sapply(row.names(hepg2), function(x){strsplit(x, "_b")[[1]][1]}, USE.NAMES=F)
+row.names(out) <- summarydata$shortname[match(rows, row.names(summarydata))]
+kable(out, format='markdown')
+```
+
+### SHSY5Y samples
+
+```{r qc-measures-shs}
+shs <- read.delim("QC//SHSY5Y_QC", header=T, sep="\t", row.names=1)
+out <- shs[,c("estFraglen", "NSC","RSC","quality")]
+rows <- sapply(row.names(shs), function(x){strsplit(x, "_b")[[1]][1]}, USE.NAMES=F)
+row.names(out) <- summarydata$shortname[match(rows, row.names(summarydata))]
+kable(out, format='markdown')
+```
+
+
+## Peak Calling
+Peak calling was performed with two different peak callers MACS and SPP. Both peak callers were run using both using default parameters. The **number of peaks generated at and FDR of 0.05** (slightly less conservative than the default, which is 0.01) for each are plotted below, and an Excel spreadsheet containing a summary of all numbers can be dowloaded [here](sample_stats.xls). There is a similar trend in the peak calls between the two peak callers for HepG2 samples, but not for SHSY5Y. We hypothesize that this is due to the larger number of peaks being called although we cannot say for certain.
+
+
+Generally, you cant really compare peaks from two different peak callers using their default or arbitrary thresholds as they are uncalibrated.  **We will use MACS as our peak caller and run samples through the IDR pipeline.**
+
+### MACS
+
+```{r macs-plot}
+
+data <- summarydata[which(!is.na(summarydata$macs_peak_calls)), c('shortname','celltype', 'rep', 'IP', 
+                                                                  'treatment', 'macs_peak_calls')] 
+data$label <- factor(paste(data$treatment, data$rep, sep="-"))
+df <- melt(data)
+
+
+ggplot(df, aes(x=label, y=value)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(aes(fill=treatment),  position="dodge", stat="identity") +
+    ylab("peaks") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+    facet_grid(celltype ~ IP, scales="free")
+```
+
+### SPP
+
+```{r spp-plot}
+
+data <- summarydata[which(!is.na(summarydata$macs_peak_calls)), c('shortname','celltype', 'rep', 'IP', 
+                                                                  'treatment', 'spp_peak_calls')] 
+data$label <- factor(paste(data$treatment, data$rep, sep="-"))
+df <- melt(data)
+
+ggplot(df, aes(x=label, y=value)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(aes(fill=treatment),  position="dodge", stat="identity") +
+    ylab("peaks") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+    facet_grid(celltype ~ IP, scales="free")
+```
+
+
+## IDR: Irreproducible Discovery Rate
+The IDR method compares a pair of ranked lists of regions (such as ChIP-seq peaks), to identify reproducible signals. These ranked lists should not be pre-thresholded i.e. they should provide identifications across the entire spectrum of high confidence/enrichment (signal) and low confidence/enrichment (noise). The IDR method then fits the bivariate rank distributions over the replicates in order to separate signal from noise based on a defined confidence of rank consistency and reproducibility of identifications i.e the IDR threshold.
+
+Samples were run through the new [beta version of IDR](ttps://github.com/nboley/idr) (the older version is not being maintained).  Its far more streamlined with bug fixes and much faster. 
+
+The IDR pipeline is as follows:
+
+1. Take each alignment file and call peaks using MACS2 v2.1.0. Rather than calling peaks at a given FDR, we provide a more liberal threshold. For MACS2 the q-value threshold unfortunately is partially tied to peak widths. Relaxing the q-value thresholds, you get more peaks, but also results in wider and wider peaks- resulting in loss of precision. Instead we supply a **p-value threshold (p < 0.001)** which relaxes the threshold enough to give us peak lists for ample comaprison across replicates.
+
+2. The narrowPeak files generated by MACS are used as input to IDR, with replicates for each sample group being run together. This will result in a [merged peak file](https://github.com/nboley/idr#output-file-format), with IDR values for each peak.
+
+3. For each sample group we generated pooled pseudoreplicates, by merging the BAM (alignment files) across replicates and randomly splitting the reads in two files (pseudo-replicates). Each alignment file was then run through MACS2 and peak calls from each pseudo-replicate were used as input to IDR.
+
+The manual states that if starting with < 100K pre-IDR peaks for large genomes (human/mouse), then a **threshold of 0.05** is more appropriate. This is because the IDR sees a smaller noise component and the IDR scores get weaker. We use a tighter threshold for pooled-consistency since pooling and subsampling equalizes the pseudo-replicates in terms of data quality. So we err on the side of caution and use more stringent thresholds. For pooled pseudo-replicates we applied and IDR **threshold of 0.01** to generate the numbers below.
+
+### IDR results
+
+```{r idr-table, echo=FALSE, results='asis'}
+idr_res <- read.delim("idr_macs/results.txt", sep="\t", header=T, row.names=1)
+out <- idr_res[which(idr_res$sample == "data"), c("sig.regions", "overlapping.regions")]
+kable(out, format = 'markdown')
+```
+
+
+### HepG2 samples
+
+```{r idr-hepg2}
+idr_HepG2 <- idr_res[which(idr_res$celltype == "HepG2"), -6]
+idr_HepG2$label <- factor(paste(idr_HepG2$treatment, idr_HepG2$sample, sep="-"))
+df <- melt(idr_HepG2)
+cols=c("purple", "grey")
+
+ggplot(df, aes(x=label, y=value)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(aes(fill=sample),  position="dodge", stat="identity") +
+    ylab("peaks") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+    facet_grid(. ~ IP, scales="free") +
+    scale_fill_manual(values = cols) 
+
+```
+
+
+### SHSY5Y samples
+```{r idr-shs}
+
+idr_SHS <- idr_res[which(idr_res$celltype == "SHSY5Y"), -6]
+idr_SHS$label <- factor(paste(idr_SHS$treatment, idr_SHS$sample, sep="-"))
+df <- melt(idr_SHS)
+
+
+ggplot(df, aes(x=label, y=value)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(aes(fill=sample),  position="dodge", stat="identity") +
+    ylab("peaks") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+    facet_grid(. ~ IP, scales="free") +
+    scale_fill_manual(values = cols) 
+
+```
+
+
+If your replicates are truly good replicates then the results from the two runs are usually similar (within a factor of 2 at max). Anything beyond that indicates the true replicates are substantially different and is almost always a sign that one the replicates is messed up or is a sample swap or some other issue.
+
+What we find is that for the **SHSY5Y samples we see a pretty good similarity** in peak number between real and pseudoreplicates; indicating they **truly are good replicates** and we can take the top peaks for downstream analysis. For the HepG2 samples, it is questionable whether the replicates are at all concordant. 
+
+
+## IDR HepG2: Experiment1 + Experiment2
+Looking back at the total number of peaks identified from MACS, with the HepG2 samples there appears to be only one replicate for each IP that seemed to have worked well. For the Pol2 samples rep2 identified a larger set of peaks, and for the IR samples rep1 identified  larger set of peaks. Under the assumption that these are the more reliable replicates we can combine these with HepG2 samples from the previous experiment and run it through the IDR pipeline. 
+
+The figure below demonstrates that the HepG2 samples from the previous experiment (Experiment1) and the good replicates from the current experiment (HepG2IR-rep1 and HepG2Pol2-rep2) are concordant based on IDR analysis. The number of peaks that meet the IDR thresholds set above are within a factor of 2 for the replicates and pooled pseudoreplicates. This is the case for all samples except for HepG2Pol2-con.    
+
+### IDR results
+
+```{r idr-HepG2-table, echo=FALSE, results='asis'}
+idr_res_hepg2 <- read.delim("idr_expt1_expt2/results.txt", sep="\t", header=T, row.names=1)
+out <- idr_res_hepg2[which(idr_res_hepg2$sample == "data"), c("sig.regions", "overlapping.regions")]
+kable(out, format = 'markdown')
+```
+
+```{r idr-exp1-exp2}
+
+idr_res_hepg2$label <- factor(paste(idr_res_hepg2$treatment, idr_res_hepg2$sample, sep="-"))
+df <- melt(idr_res_hepg2[,-5])
+
+
+ggplot(df, aes(x=label, y=value)) +
+    theme_bw(base_size=10) +
+    theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.text.x = element_text(angle=45, hjust=1)) +
+    geom_bar(aes(fill=sample),  position="dodge", stat="identity") +
+    ylab("peaks") + xlab("") +
+    theme(axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+    facet_grid(. ~ IP, scales="free") +
+    scale_fill_manual(values = cols) 
+
+```
+
